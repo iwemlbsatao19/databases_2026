@@ -1,0 +1,152 @@
+// =============================================================================
+//  ER-диаграмма модели «Служба доставки еды» в формате DBML.
+//  Как посмотреть: открыть https://dbdiagram.io/d , вставить этот текст —
+//  диаграмма отрисуется автоматически (нотация «воронья лапка»).
+// =============================================================================
+
+Enum order_status {
+  created
+  confirmed
+  cooking
+  ready_for_pickup
+  in_delivery
+  delivered
+  cancelled
+}
+
+Enum payment_method {
+  card_online
+  card_courier
+  cash
+  sbp
+}
+
+Table users {
+  user_id    bigint      [pk, increment]
+  full_name  varchar(150)[not null]
+  phone      varchar(20) [not null, unique, note: 'бизнес-ключ']
+  email      varchar(254)[unique]
+  created_at timestamptz [not null, default: `now()`]
+  is_active  boolean     [not null, default: true]
+}
+
+Table user_addresses {
+  address_id bigint      [pk, increment]
+  user_id    bigint      [not null, ref: > users.user_id]
+  city       varchar(100)[not null]
+  district   varchar(100)
+  street     varchar(150)[not null]
+  building   varchar(20) [not null]
+  apartment  varchar(20)
+  latitude   numeric(9,6)
+  longitude  numeric(9,6)
+  is_default boolean     [not null, default: false]
+}
+
+Table restaurants {
+  restaurant_id bigint      [pk, increment]
+  name          varchar(150)[not null]
+  city          varchar(100)[not null]
+  district      varchar(100)[not null]
+  address_text  varchar(300)[not null]
+  phone         varchar(20) [not null]
+  latitude      numeric(9,6)
+  longitude     numeric(9,6)
+  rating        numeric(2,1)[not null, default: 0, note: 'денормализованный агрегат']
+  reviews_count integer     [not null, default: 0]
+  opens_at      time        [not null]
+  closes_at     time        [not null]
+  is_active     boolean     [not null, default: true]
+  created_at    timestamptz [not null, default: `now()`]
+
+  indexes {
+    (city, district, rating) [name: 'idx_restaurants_district_rating']
+  }
+}
+
+Table dishes {
+  dish_id       bigint       [pk, increment]
+  restaurant_id bigint       [not null, ref: > restaurants.restaurant_id]
+  name          varchar(150) [not null]
+  description   text
+  category      varchar(30)  [not null]
+  price         numeric(10,2)[not null, note: 'price > 0']
+  weight_grams  integer
+  is_available  boolean      [not null, default: true]
+  created_at    timestamptz  [not null, default: `now()`]
+
+  indexes {
+    (restaurant_id, name) [unique]
+  }
+}
+
+Table dish_price_history {
+  price_history_id bigint       [pk, increment]
+  dish_id          bigint       [not null, ref: > dishes.dish_id]
+  price            numeric(10,2)[not null]
+  valid_from       timestamptz  [not null, default: `now()`]
+  valid_to         timestamptz  [note: 'NULL = действует сейчас']
+  changed_by       varchar(50)  [not null]
+}
+
+Table couriers {
+  courier_id       bigint      [pk, increment]
+  full_name        varchar(150)[not null]
+  phone            varchar(20) [not null, unique]
+  vehicle_type     varchar(20) [not null]
+  rating           numeric(2,1)[not null, default: 0]
+  completed_orders integer     [not null, default: 0]
+  is_active        boolean     [not null, default: true]
+  hired_at         date        [not null, default: `CURRENT_DATE`]
+}
+
+Table orders {
+  order_id              bigint         [pk, increment]
+  user_id               bigint         [not null, ref: > users.user_id]
+  restaurant_id         bigint         [not null, ref: > restaurants.restaurant_id]
+  courier_id            bigint         [ref: > couriers.courier_id, note: 'NULL пока курьер не назначен']
+  address_id            bigint         [ref: > user_addresses.address_id]
+  delivery_address_text varchar(300)   [not null, note: 'снимок адреса']
+  status                order_status   [not null, default: 'created']
+  payment_method        payment_method [not null]
+  items_total           numeric(12,2)  [not null, default: 0]
+  delivery_fee          numeric(10,2)  [not null, default: 0]
+  total_amount          numeric(12,2)  [note: 'GENERATED: items_total + delivery_fee']
+  created_at            timestamptz    [not null, default: `now()`]
+  delivered_at          timestamptz
+  cancelled_at          timestamptz
+}
+
+Table order_items {
+  order_id   bigint       [not null, ref: > orders.order_id]
+  dish_id    bigint       [not null, ref: > dishes.dish_id]
+  quantity   integer      [not null, note: 'quantity > 0']
+  unit_price numeric(10,2)[not null, note: 'снимок цены на момент заказа']
+  line_total numeric(12,2)[note: 'GENERATED: quantity * unit_price']
+
+  indexes {
+    (order_id, dish_id) [pk]
+  }
+}
+
+Table order_status_history {
+  status_history_id bigint      [pk, increment]
+  order_id          bigint      [not null, ref: > orders.order_id]
+  old_status        order_status
+  new_status        order_status[not null]
+  changed_at        timestamptz [not null, default: `now()`]
+  changed_by        varchar(50) [not null]
+  reason            text
+}
+
+Table reviews {
+  review_id         bigint      [pk, increment]
+  order_id          bigint      [not null, unique, ref: - orders.order_id]
+  user_id           bigint      [not null, ref: > users.user_id]
+  restaurant_id     bigint      [not null, ref: > restaurants.restaurant_id]
+  courier_id        bigint      [ref: > couriers.courier_id]
+  restaurant_rating smallint    [note: '1..5']
+  courier_rating    smallint    [note: '1..5']
+  comment           text
+  created_at        timestamptz [not null, default: `now()`]
+}
